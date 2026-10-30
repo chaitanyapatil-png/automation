@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# Ensure the script is run with root privileges
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "Error: This script must be run as root (use sudo)." >&2
+  exit 1
+fi
+
+ACTION="add"
+COMMENT=""
+START_UID=""
+
+# Parse options using getopts
+while getopts "rc:i:" opt; do
+  case ${opt} in
+    r ) ACTION="remove" ;;
+    c ) COMMENT="${OPTARG}" ;;
+    i ) START_UID="${OPTARG}" ;;
+    \? ) 
+      echo "Usage: $0 [-r (for remove)] -c 'Comment' -i UID username1 username2 ..." >&2
+      exit 1 
+      ;;
+  esac
+done
+
+# Shift parsed options out of the way to process the usernames
+shift $((OPTIND -1))
+
+# Ensure at least one username is provided
+if [[ $# -eq 0 ]]; then
+  echo "Error: No usernames provided." >&2
+  echo "Usage: $0 [-r] -c 'Comment' -i UID username1 username2 ..." >&2
+  exit 1
+fi
+
+CURRENT_UID="$START_UID"
+
+# Loop through all provided usernames
+for USERNAME in "$@"; do
+  if [[ "$ACTION" == "remove" ]]; then
+    
+    # REMOVE USER LOGIC
+    if id "$USERNAME" &>/dev/null; then
+      userdel -r "$USERNAME" # -r removes the user's home directory
+      if [[ $? -eq 0 ]]; then
+        echo "Success: User '$USERNAME' removed."
+      else
+        echo "Error: Failed to remove user '$USERNAME'." >&2
+      fi
+    else
+      echo "Skip: User '$USERNAME' does not exist."
+    fi
+
+  else
+    
+    # ADD USER LOGIC
+    if id "$USERNAME" &>/dev/null; then
+      echo "Skip: User '$USERNAME' already exists."
+    else
+      # Build the useradd command securely using an array
+      CMD=(useradd -m -s /bin/bash)
+      
+      if [[ -n "$COMMENT" ]]; then
+        CMD+=(-c "$COMMENT")
+      fi
+      
+      if [[ -n "$CURRENT_UID" ]]; then
+        CMD+=(-u "$CURRENT_UID")
+        ((CURRENT_UID++)) # Auto-increment UID for subsequent users
+      fi
+      
+      CMD+=("$USERNAME")
+      
+      # Execute the array command
+      "${CMD[@]}"
+      
+      if [[ $? -eq 0 ]]; then
+        echo "Success: User '$USERNAME' created."
+      else
+        echo "Error: Failed to create user '$USERNAME'." >&2
+      fi
+    fi
+  fi
+done
